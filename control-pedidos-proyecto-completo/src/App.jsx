@@ -231,6 +231,11 @@ async function extraerCotizacionPdf(archivo) {
   return { cliente, vendedorCotizacion, referenciaTipo, referenciaNum, metodo, items };
 }
 const hoy = () => new Date().toISOString().slice(0, 10);
+const hace = (dias) => {
+  const d = new Date();
+  d.setDate(d.getDate() - dias);
+  return d.toISOString().slice(0, 10);
+};
 
 const vacio = () => ({
   id: uid(),
@@ -438,8 +443,8 @@ function PantallaLogin({ rol, onVolver, onExito }) {
   const [error, setError] = useState("");
   const [verificando, setVerificando] = useState(false);
 
-  const validar = async (e) => {
-    e.preventDefault();
+  const intentarEntrar = async () => {
+    if (verificando) return;
     setVerificando(true);
     const u = usuario.trim().toLowerCase();
     const hashIngresado = await sha256Hex(clave);
@@ -459,6 +464,17 @@ function PantallaLogin({ rol, onVolver, onExito }) {
     setError("Usuario o clave incorrectos.");
   };
 
+  const validar = (e) => {
+    e.preventDefault();
+    intentarEntrar();
+  };
+
+  const enterDirecto = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    intentarEntrar();
+  };
+
   return (
     <div style={{ minHeight: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 20px" }}>
       <form onSubmit={validar} style={{ maxWidth: 360, width: "100%", background: "#FBFAF6", border: "1px solid #C9C2AE", borderRadius: 4, padding: 30 }}>
@@ -471,11 +487,11 @@ function PantallaLogin({ rol, onVolver, onExito }) {
           Ingresa tu usuario y clave para continuar.
         </p>
         <Campo label="Usuario">
-          <input value={usuario} onChange={(e) => setUsuario(e.target.value)} style={estiloInput} autoFocus />
+          <input value={usuario} onChange={(e) => setUsuario(e.target.value)} onKeyDown={enterDirecto} style={estiloInput} autoFocus />
         </Campo>
         <div style={{ height: 12 }} />
         <Campo label="Clave">
-          <input type="password" value={clave} onChange={(e) => setClave(e.target.value)} style={estiloInput} />
+          <input type="password" value={clave} onChange={(e) => setClave(e.target.value)} onKeyDown={enterDirecto} style={estiloInput} />
         </Campo>
         {error && (
           <div className="sans" style={{ marginTop: 14, fontSize: 13, padding: "9px 11px", borderRadius: 4, background: "#F3DCD3", color: "#8A3B22", display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -511,6 +527,8 @@ function VistaVendedor({ vendedor, onSalir }) {
   const [importando, setImportando] = useState(false);
   const [errorImport, setErrorImport] = useState(null);
   const [previewImport, setPreviewImport] = useState(null);
+  const [filtroDesde, setFiltroDesde] = useState(hace(7));
+  const [filtroHasta, setFiltroHasta] = useState("");
   const codigoRefs = useRef({});
   const cantidadRefs = useRef({});
   const archivoInputRef = useRef(null);
@@ -536,6 +554,8 @@ function VistaVendedor({ vendedor, onSalir }) {
 
   const propios = misPedidos
     .filter((p) => p.vendedor.trim().toLowerCase() === vendedor.trim().toLowerCase())
+    .filter((p) => (filtroDesde ? p.fecha >= filtroDesde : true))
+    .filter((p) => (filtroHasta ? p.fecha <= filtroHasta : true))
     .sort((a, b) => b.creadoEn - a.creadoEn);
 
   const actualizarLinea = (id, campo, valor) => {
@@ -830,10 +850,29 @@ function VistaVendedor({ vendedor, onSalir }) {
       </div>
 
       <div className="sans" style={{ fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: "#8A6E4B", margin: "30px 0 10px" }}>Mis pedidos enviados</div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <label className="sans" style={{ fontSize: 12, color: "#5C5748", display: "flex", alignItems: "center", gap: 6 }}>
+          Desde
+          <input type="date" value={filtroDesde} onChange={(e) => setFiltroDesde(e.target.value)} style={{ ...estiloInput, width: "auto", fontSize: 13, padding: "6px 8px" }} />
+        </label>
+        <label className="sans" style={{ fontSize: 12, color: "#5C5748", display: "flex", alignItems: "center", gap: 6 }}>
+          Hasta
+          <input type="date" value={filtroHasta} onChange={(e) => setFiltroHasta(e.target.value)} style={{ ...estiloInput, width: "auto", fontSize: 13, padding: "6px 8px" }} />
+        </label>
+        {(filtroDesde || filtroHasta) && (
+          <button onClick={() => { setFiltroDesde(""); setFiltroHasta(""); }} className="sans" style={{ background: "none", border: "none", color: "#8A6E4B", cursor: "pointer", fontSize: 12, textDecoration: "underline", padding: 0 }}>
+            Ver todos
+          </button>
+        )}
+      </div>
+
       {cargandoLista ? (
         <p className="sans" style={{ fontSize: 13, color: "#8A8370" }}>Cargando…</p>
       ) : propios.length === 0 ? (
-        <p className="sans" style={{ fontSize: 13, color: "#8A8370" }}>Aún no has enviado pedidos.</p>
+        <p className="sans" style={{ fontSize: 13, color: "#8A8370" }}>
+          {filtroDesde || filtroHasta ? "No hay pedidos en ese rango de fechas." : "Aún no has enviado pedidos."}
+        </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {propios.map((p) => (
