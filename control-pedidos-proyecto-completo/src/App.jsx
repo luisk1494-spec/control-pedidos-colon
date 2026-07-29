@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { Plus, Trash2, Download, RefreshCw, ClipboardList, Truck, ChevronLeft, Check, AlertCircle, PackageSearch, Lock, LogOut, Mail, FileUp, X } from "lucide-react";
+import { Plus, Trash2, Download, RefreshCw, ClipboardList, Truck, ChevronLeft, Check, AlertCircle, PackageSearch, Lock, LogOut, Mail, FileUp, X, Clock } from "lucide-react";
 
 const SUPABASE_URL = "https://biujteotjtafzsmkbbqi.supabase.co";
 const SUPABASE_KEY = "sb_publishable_TrdxYYtD9Kt4bD6VLCip_Q_J2mlpi6E";
@@ -235,6 +235,14 @@ const hace = (dias) => {
   const d = new Date();
   d.setDate(d.getDate() - dias);
   return d.toISOString().slice(0, 10);
+};
+const horaDe = (timestampMs) => {
+  if (!timestampMs) return "";
+  try {
+    return new Date(timestampMs).toLocaleTimeString("es-PA", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
 };
 
 const vacio = () => ({
@@ -679,7 +687,14 @@ function VistaVendedor({ vendedor, onSalir }) {
         </button>
       </div>
       <h1 style={{ fontSize: 28, margin: "18px 0 4px" }}>Nuevo pedido</h1>
-      <p className="sans" style={{ color: "#5C5748", fontSize: 13, marginBottom: 28 }}>Llena el detalle del pedido.</p>
+      <p className="sans" style={{ color: "#5C5748", fontSize: 13, marginBottom: 16 }}>Llena el detalle del pedido.</p>
+
+      <div className="sans" style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#F0EDE4", border: "1px solid #C9C2AE", borderRadius: 4, padding: "12px 14px", marginBottom: 22, fontSize: 12.5, color: "#5C5748", lineHeight: 1.6 }}>
+        <Clock size={16} style={{ flexShrink: 0, marginTop: 2, color: "#8A6E4B" }} />
+        <div>
+          <strong style={{ color: "#20241F" }}>Cierres de pedido:</strong> los pedidos enviados de lunes a miércoles antes de las 10:00 a.m. llegan el <strong>viernes</strong>. Los pedidos enviados desde el miércoles después de las 10:00 a.m., y durante jueves, viernes y sábado, llegan el <strong>miércoles</strong> siguiente.
+        </div>
+      </div>
 
       <div style={{ background: "#FBFAF6", border: "1px solid #C9C2AE", borderRadius: 4, padding: 22, marginBottom: 22 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
@@ -878,7 +893,7 @@ function VistaVendedor({ vendedor, onSalir }) {
           {propios.map((p) => (
             <div key={p.id} style={{ border: "1px solid #C9C2AE", borderRadius: 4, padding: "10px 14px", background: "#FBFAF6", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
               <div className="sans" style={{ fontSize: 13 }}>
-                <strong className="mono">{p.pedidoRef}</strong> · {p.cliente} · {p.fecha} · {p.lineas.length} código{p.lineas.length !== 1 ? "s" : ""}
+                <strong className="mono">{p.pedidoRef}</strong> · {p.cliente} · {p.fecha} {horaDe(p.creadoEn)} · {p.lineas.length} código{p.lineas.length !== 1 ? "s" : ""}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <a
@@ -1180,7 +1195,7 @@ function VistaCompras({ onSalir }) {
                   <input type="checkbox" checked={!!seleccion[p.id]} onChange={(e) => setSeleccion({ ...seleccion, [p.id]: e.target.checked })} />
                   <strong className="mono">{p.pedidoRef}</strong>
                   <span style={{ color: "#5C5748" }}>{p.cliente}</span>
-                  <span style={{ color: "#8A8370" }}>{p.fecha}</span>
+                  <span style={{ color: "#8A8370" }}>{p.fecha} {horaDe(p.creadoEn)}</span>
                   <span style={{ color: "#8A8370" }}>{p.vendedor}</span>
                   <span style={{ color: "#8A8370", textTransform: "uppercase", fontSize: 11 }}>{p.metodoPago}</span>
                   <span className="stamp" style={{ marginLeft: "auto", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", padding: "3px 9px", borderRadius: 3, border: `1px solid ${p.estado === "exportado" ? "#3E5A2A" : "#8A6E4B"}`, color: p.estado === "exportado" ? "#3E5A2A" : "#8A6E4B" }}>
