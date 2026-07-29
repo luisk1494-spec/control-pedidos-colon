@@ -594,15 +594,24 @@ function VistaVendedor({ vendedor, onSalir }) {
     setForm((f) => {
       const lineasActuales = f.lineas.filter((l) => l.codigo.trim() || String(l.cantidad).trim());
       const lineasNuevas = previewImport.items.map((it) => ({ id: uid(), codigo: it.codigo, cantidad: it.cantidad }));
-      const pedidoRef = previewImport.referenciaNum
+
+      const agregarSinRepetir = (actual, nuevo) => {
+        if (!nuevo) return actual;
+        const partes = actual.split(",").map((s) => s.trim()).filter(Boolean);
+        if (partes.some((p) => p.toLowerCase() === nuevo.toLowerCase())) return actual;
+        return partes.length === 0 ? nuevo : `${actual}, ${nuevo}`;
+      };
+
+      const nuevaRef = previewImport.referenciaNum
         ? previewImport.referenciaTipo === "Pedido"
           ? previewImport.referenciaNum
           : `COT-${previewImport.referenciaNum}`
-        : f.pedidoRef;
+        : null;
+
       return {
         ...f,
-        cliente: previewImport.cliente || f.cliente,
-        pedidoRef,
+        cliente: agregarSinRepetir(f.cliente, previewImport.cliente),
+        pedidoRef: agregarSinRepetir(f.pedidoRef, nuevaRef),
         metodoPago: previewImport.metodo || f.metodoPago,
         lineas: [...lineasActuales, ...lineasNuevas],
       };
