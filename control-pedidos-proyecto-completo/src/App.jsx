@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { Plus, Trash2, Download, RefreshCw, ClipboardList, Truck, ChevronLeft, Check, AlertCircle, PackageSearch, Lock, LogOut, Mail, FileUp, X, Clock } from "lucide-react";
 
 const SUPABASE_URL = "https://biujteotjtafzsmkbbqi.supabase.co";
@@ -1000,6 +1001,26 @@ const estiloInput = {
 
 const PRECIO_FIJO = 1;
 
+// Mapa de vendedor -> sucursal, usado para separar el informe en pestañas.
+const VENDEDOR_A_SUCURSAL = {
+  Maykeling: "EDISON",
+  Omar: "EDISON",
+  Gabriel: "EDISON",
+  Cathy: "PAITILLA",
+  Carlos: "PAITILLA",
+  Boris: "PAITILLA",
+  Elizabeth: "PAITILLA",
+  Betzabeth: "COSTA DEL ESTE",
+  Marianela: "COSTA DEL ESTE",
+  Linda: "COSTA DEL ESTE",
+  Ana: "PROYECTO",
+  Joshua: "PROYECTO",
+  Xochil: "PROYECTO",
+  Elsa: "PROYECTO",
+  Katiana: "PROYECTO",
+  Itvan: "WEB",
+};
+
 function VistaCompras({ onSalir }) {
   const [pedidos, setPedidos] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -1007,6 +1028,10 @@ function VistaCompras({ onSalir }) {
   const [filtroVendedor, setFiltroVendedor] = useState("");
   const [filtroDesde, setFiltroDesde] = useState("");
   const [filtroHasta, setFiltroHasta] = useState("");
+  const [mostrarFormularioInforme, setMostrarFormularioInforme] = useState(false);
+  const [informeDesde, setInformeDesde] = useState(hace(7));
+  const [informeHasta, setInformeHasta] = useState(hoy());
+  const [generandoInforme, setGenerandoInforme] = useState(false);
   const [seleccion, setSeleccion] = useState({}); // pedidoId -> bool
   const [incluirEncabezados, setIncluirEncabezados] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -1126,6 +1151,101 @@ function VistaCompras({ onSalir }) {
     setSeleccion(s);
   };
 
+  const generarInforme = async (desde, hasta) => {
+    const exportados = pedidos
+      .filter((p) => p.estado === "exportado")
+      .filter((p) => (filtroVendedor ? p.vendedor === filtroVendedor : true))
+      .filter((p) => p.fecha >= desde)
+      .filter((p) => p.fecha <= hasta)
+      .sort((a, b) => a.creadoEn - b.creadoEn);
+
+    if (exportados.length === 0) {
+      setAviso({ tipo: "error", texto: "No hay pedidos exportados en ese rango de fechas." });
+      return;
+    }
+
+    setGenerandoInforme(true);
+    const encabezado = ["Fecha", "Pedido", "Cliente", "Vendedor", "Código", "Cantidad"];
+    const filasDe = (lista) => {
+      const filas = [];
+      lista.forEach((p) => {
+        p.lineas.forEach((l) => {
+          filas.push([p.fecha, p.pedidoRef, p.cliente, p.vendedor, l.codigo, l.cantidad]);
+        });
+      });
+      return filas;
+    };
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "Control de Pedidos - Ilumitec";
+    wb.created = new Date();
+
+    const agregarHoja = (nombre, filas, colorTab) => {
+      const ws = wb.addWorksheet(nombre.slice(0, 31), colorTab ? { properties: { tabColor: { argb: colorTab } } } : undefined);
+      ws.addRow(encabezado);
+      ws.getRow(1).eachCell((celda) => {
+        celda.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        celda.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF20241F" } };
+        celda.alignment = { vertical: "middle", horizontal: "center" };
+      });
+      filas.forEach((fila, i) => {
+        const row = ws.addRow(fila);
+        const colorFondo = i % 2 === 0 ? "FFFBFAF6" : "FFF0EDE4";
+        row.eachCell((celda) => {
+          celda.fill = { type: "pattern", pattern: "solid", fgColor: { argb: colorFondo } };
+          celda.border = {
+            top: { style: "thin", color: { argb: "FFE4DFCF" } },
+            bottom: { style: "thin", color: { argb: "FFE4DFCF" } },
+            left: { style: "thin", color: { argb: "FFE4DFCF" } },
+            right: { style: "thin", color: { argb: "FFE4DFCF" } },
+          };
+        });
+      });
+      ws.columns = [{ width: 13 }, { width: 16 }, { width: 28 }, { width: 16 }, { width: 24 }, { width: 11 }];
+      ws.views = [{ state: "frozen", ySplit: 1 }];
+    };
+
+    agregarHoja("Informe", filasDe(exportados), "FF20241F");
+
+    const ordenSucursales = ["EDISON", "PAITILLA", "COSTA DEL ESTE", "PROYECTO", "WEB"];
+    const coloresSucursal = {
+      EDISON: "FF2F5D8A",
+      PAITILLA: "FF3E5A2A",
+      "COSTA DEL ESTE": "FFB0553C",
+      PROYECTO: "FF6B4C9A",
+      WEB: "FF0E7C86",
+    };
+    ordenSucursales.forEach((sucursal) => {
+      const pedidosSucursal = exportados.filter((p) => VENDEDOR_A_SUCURSAL[p.vendedor] === sucursal);
+      if (pedidosSucursal.length > 0) {
+        agregarHoja(sucursal, filasDe(pedidosSucursal), coloresSucursal[sucursal]);
+      }
+    });
+    const sinSucursal = exportados.filter((p) => !VENDEDOR_A_SUCURSAL[p.vendedor]);
+    if (sinSucursal.length > 0) {
+      agregarHoja("Otros", filasDe(sinSucursal), "FF8A8370");
+    }
+
+    try {
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `informe-exportados_${desde}_a_${hasta}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      const totalLineas = exportados.reduce((acc, p) => acc + p.lineas.length, 0);
+      setAviso({ tipo: "ok", texto: `Informe generado: ${exportados.length} pedido${exportados.length !== 1 ? "s" : ""} exportado${exportados.length !== 1 ? "s" : ""}, ${totalLineas} línea${totalLineas !== 1 ? "s" : ""}, con pestañas por sucursal.` });
+      setMostrarFormularioInforme(false);
+    } catch (err) {
+      setAviso({ tipo: "error", texto: "No se pudo generar el archivo del informe. Intenta de nuevo." });
+    }
+    setGenerandoInforme(false);
+  };
+
   return (
     <div style={{ maxWidth: 980, margin: "0 auto", padding: "36px 20px 100px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
@@ -1137,6 +1257,9 @@ function VistaCompras({ onSalir }) {
             style={{ display: "flex", alignItems: "center", gap: 6, background: sonidoActivo ? "#20241F" : "none", color: sonidoActivo ? "#F0EDE4" : "#5C5748", border: "1px solid #C9C2AE", borderRadius: 4, padding: "6px 12px", fontSize: 12, cursor: "pointer" }}
           >
             {sonidoActivo ? "🔔 Sonido activo" : "🔕 Activar sonido"}
+          </button>
+          <button onClick={() => setMostrarFormularioInforme(true)} className="sans" style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid #C9C2AE", borderRadius: 4, padding: "6px 12px", fontSize: 12, color: "#5C5748", cursor: "pointer" }}>
+            <Download size={13} /> Generar informe
           </button>
           <button onClick={cargar} className="sans" style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid #C9C2AE", borderRadius: 4, padding: "6px 12px", fontSize: 12, color: "#5C5748", cursor: "pointer" }}>
             <RefreshCw size={13} /> Actualizar
@@ -1191,6 +1314,40 @@ function VistaCompras({ onSalir }) {
           {visibles.length} pedido{visibles.length !== 1 ? "s" : ""}
         </span>
       </div>
+      <div className="sans" style={{ fontSize: 11, color: "#8A8370", marginBottom: 18 }}>
+        "Generar informe" te va a pedir un rango de fechas aparte (y usa el filtro de vendedor de arriba si tienes uno puesto). Solo incluye pedidos ya exportados.
+      </div>
+
+      {mostrarFormularioInforme && (
+        <div style={{ border: "1px solid #8A6E4B", borderRadius: 4, background: "#FBFAF6", padding: 16, marginBottom: 18 }}>
+          <div className="sans" style={{ fontSize: 13, color: "#20241F", marginBottom: 10, fontWeight: 600 }}>
+            Elige el rango de fechas del informe
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+            <label className="sans" style={{ fontSize: 12, color: "#5C5748", display: "flex", alignItems: "center", gap: 6 }}>
+              Desde
+              <input type="date" value={informeDesde} onChange={(e) => setInformeDesde(e.target.value)} style={{ ...estiloInput, width: "auto", fontSize: 13, padding: "6px 8px" }} />
+            </label>
+            <label className="sans" style={{ fontSize: 12, color: "#5C5748", display: "flex", alignItems: "center", gap: 6 }}>
+              Hasta
+              <input type="date" value={informeHasta} onChange={(e) => setInformeHasta(e.target.value)} style={{ ...estiloInput, width: "auto", fontSize: 13, padding: "6px 8px" }} />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+            <button
+              onClick={() => generarInforme(informeDesde, informeHasta)}
+              disabled={!informeDesde || !informeHasta || generandoInforme}
+              className="sans"
+              style={{ background: "#20241F", color: "#F0EDE4", border: "none", borderRadius: 4, padding: "9px 16px", fontSize: 13, cursor: !informeDesde || !informeHasta || generandoInforme ? "default" : "pointer", opacity: !informeDesde || !informeHasta || generandoInforme ? 0.5 : 1 }}
+            >
+              {generandoInforme ? "Generando…" : "Descargar informe"}
+            </button>
+            <button onClick={() => setMostrarFormularioInforme(false)} className="sans" style={{ background: "none", border: "1px solid #C9C2AE", color: "#5C5748", borderRadius: 4, padding: "9px 16px", fontSize: 13, cursor: "pointer" }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {aviso && (
         <div className="sans" style={{ marginBottom: 16, fontSize: 13, padding: "10px 12px", borderRadius: 4, background: aviso.tipo === "ok" ? "#E4E9DA" : "#F3DCD3", color: aviso.tipo === "ok" ? "#3E5A2A" : "#8A3B22" }}>
