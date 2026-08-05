@@ -214,15 +214,39 @@ async function extraerCotizacionPdf(archivo) {
         if (/\bContado\b/.test(combinado)) metodo = "contado";
         else if (/\bCr[ée]dito\b/.test(combinado)) metodo = "credito";
       }
+    }
 
-      if (linea.length && /^\d+$/.test(linea[0].str) && clasificar(linea[0].x) === "no") {
-        const codigoTok = linea.find((p) => clasificar(p.x) === "codigo" && p.str !== "#");
-        const cantTok = linea.find((p) => clasificar(p.x) === "cant" && /^[\d,]+(\.\d+)?$/.test(p.str));
-        if (codigoTok && cantTok) {
-          items.push({ codigo: codigoTok.str.toUpperCase(), cantidad: cantTok.str.replace(/,/g, "") });
+    // Detección de ítems: se busca la línea con el número de fila (No.), y
+    // si el código es tan largo que el PDF lo parte en dos líneas (ej.
+    // "HW-BGU10-05PRO-2PK-7W-" seguido de "DIM4K" justo debajo), se junta
+    // con la línea siguiente — pero solo esa, para no arrastrar texto de
+    // íconos, características o el pie de página del último ítem.
+    const PALABRAS_PLANTILLA = /^(Marca|Caracter[ií]sticas|Observaci[oó]n|Cliente|Elaborado|SubTotal|Sub Total|Total|DETALLE|Sucursal|Impuesto|COTIZACION|Cotizaci[oó]n)/i;
+
+    lineas.forEach((linea, idx) => {
+      if (!(linea.length && /^\d+$/.test(linea[0].str) && clasificar(linea[0].x) === "no")) return;
+
+      const codigoTok = linea.find((p) => clasificar(p.x) === "codigo" && p.str !== "#");
+      const cantTok = linea.find((p) => clasificar(p.x) === "cant" && /^[\d,]+(\.\d+)?$/.test(p.str));
+      if (!codigoTok || !cantTok) return;
+
+      let codigoCompleto = codigoTok.str;
+      const siguiente = lineas[idx + 1];
+      const siguienteEsOtraFila = siguiente && /^\d+$/.test(siguiente[0]?.str || "") && clasificar(siguiente[0].x) === "no";
+      // Solo se considera que el código sigue en la línea de abajo si el
+      // texto capturado termina en guion (señal clara de que la palabra se
+      // cortó a la mitad, ej. "HW-BGU10-05PRO-2PK-7W-"). Un código completo
+      // como "CFLS-1560-40WD-05WH-E1" nunca termina en guion, así que no se
+      // le pega por error texto suelto (íconos, notas) que caiga en esa
+      // misma columna en la línea siguiente.
+      if (siguiente && !siguienteEsOtraFila && codigoCompleto.endsWith("-")) {
+        const continuacion = siguiente.find((p) => clasificar(p.x) === "codigo" && p.str !== "#");
+        if (continuacion && !PALABRAS_PLANTILLA.test(continuacion.str)) {
+          codigoCompleto += continuacion.str;
         }
       }
-    }
+      items.push({ codigo: codigoCompleto.toUpperCase(), cantidad: cantTok.str.replace(/,/g, "") });
+    });
   }
 
   if (items.length === 0) {
