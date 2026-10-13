@@ -23,9 +23,14 @@ const VENDEDORES = [
   { nombre: "Omar", usuario: "omar", claveHash: "d8486754f3fe5c91a871f7f63cc20cd5a192126373703a109176801acd417227" },
   { nombre: "Maykeling", usuario: "Maykeling", claveHash: "717ea22b306250e77e77caf8b5664237df875ec3748f2f657ffa0c8d739d5984" },
   { nombre: "Katiana", usuario: "Katiana", claveHash: "4816c05b087aae470d5f03a40bc20ba9f0b27e14d3aa45402c1275424ca1512f" },
+  { nombre: "Itzik", usuario: "Itzik", claveHash: "d33801c490d4f1a075720aad6d7aa63190fc7c838133cee2668a3770e21591f0" },
 ];
 
 const COMPRAS = { nombre: "Zoraida", usuario: "Zoraida", claveHash: "5e3e50b1d01723ed0404c32b139229998821fcaae009c0a857495bcf6bc21fcd" };
+
+// Solo estos vendedores pueden usar el modo "Punto de reorden" (reposición
+// de inventario por sucursal). El resto solo ve "Pedido de venta".
+const VENDEDORES_REORDEN_PERMITIDO = ["Betzabeth", "Cathy", "Itzik"];
 
 // Genera un hash SHA-256 en hexadecimal de un texto, usando la Web Crypto
 // del navegador (no depende de librerías externas).
@@ -277,6 +282,7 @@ const vacio = () => ({
   cliente: "",
   vendedor: "",
   metodoPago: "contado",
+  tipo: "venta", // "venta" | "reorden"
   lineas: [{ id: uid(), codigo: "", cantidad: "" }],
   estado: "pendiente",
   creadoEn: Date.now(),
@@ -301,6 +307,7 @@ function filaAPedido(fila) {
     cliente: fila.cliente,
     vendedor: fila.vendedor,
     metodoPago: fila.metodo_pago,
+    tipo: fila.tipo || "venta",
     lineas: fila.lineas,
     estado: fila.estado,
     creadoEn: Number(fila.creado_en),
@@ -316,6 +323,7 @@ function pedidoAFila(pedido) {
     cliente: pedido.cliente,
     vendedor: pedido.vendedor,
     metodo_pago: pedido.metodoPago,
+    tipo: pedido.tipo || "venta",
     lineas: pedido.lineas,
     estado: pedido.estado,
     creado_en: pedido.creadoEn,
@@ -585,6 +593,17 @@ function VistaVendedor({ vendedor, onSalir }) {
     setCargandoLista(false);
   }, []);
 
+  const cambiarTipo = (tipo) => {
+    setForm({
+      ...vacio(),
+      vendedor,
+      tipo,
+      cliente: tipo === "reorden" ? VENDEDOR_A_SUCURSAL[vendedor] || "" : "",
+    });
+    setMensaje(null);
+    setPreviewImport(null);
+  };
+
   const propios = misPedidos
     .filter((p) => p.vendedor.trim().toLowerCase() === vendedor.trim().toLowerCase())
     .filter((p) => (filtroDesde ? p.fecha >= filtroDesde : true))
@@ -663,9 +682,9 @@ function VistaVendedor({ vendedor, onSalir }) {
 
       return {
         ...f,
-        cliente: agregarSinRepetir(f.cliente, previewImport.cliente),
+        cliente: f.tipo === "reorden" ? f.cliente : agregarSinRepetir(f.cliente, previewImport.cliente),
         pedidoRef: agregarSinRepetir(f.pedidoRef, nuevaRef),
-        metodoPago: previewImport.metodo || f.metodoPago,
+        metodoPago: f.tipo === "reorden" ? f.metodoPago : previewImport.metodo || f.metodoPago,
         lineas: [...lineasActuales, ...lineasNuevas],
       };
     });
@@ -690,8 +709,14 @@ function VistaVendedor({ vendedor, onSalir }) {
       const nuevo = { ...form, id: uid(), lineas: lineasLimpias.map((l) => ({ ...l, codigo: l.codigo.trim().toUpperCase(), cantidad: Number(l.cantidad), precio: null })) };
       const ok = await insertarPedido(nuevo);
       if (ok) {
-        setMensaje({ tipo: "ok", texto: `Pedido ${form.pedidoRef} enviado a compras. Dale clic al botón de abajo para mandar también el correo.`, pedido: nuevo });
-        setForm({ ...vacio(), vendedor });
+        const tipoActual = form.tipo;
+        setMensaje({ tipo: "ok", texto: `${tipoActual === "reorden" ? "Reposición" : "Pedido"} ${form.pedidoRef} enviado a compras. Dale clic al botón de abajo para mandar también el correo.`, pedido: nuevo });
+        setForm({
+          ...vacio(),
+          vendedor,
+          tipo: tipoActual,
+          cliente: tipoActual === "reorden" ? VENDEDOR_A_SUCURSAL[vendedor] || "" : "",
+        });
         await refrescarMisPedidos();
         avisarNuevoPedido(nuevo);
       } else {
@@ -711,17 +736,42 @@ function VistaVendedor({ vendedor, onSalir }) {
           <LogOut size={14} /> Cerrar sesión
         </button>
       </div>
-      <h1 style={{ fontSize: 28, margin: "18px 0 4px" }}>Nuevo pedido</h1>
-      <p className="sans" style={{ color: "#5C5748", fontSize: 13, marginBottom: 16 }}>Llena el detalle del pedido.</p>
+      <h1 style={{ fontSize: 28, margin: "18px 0 4px" }}>{form.tipo === "reorden" ? "Punto de reorden" : "Nuevo pedido"}</h1>
+      <p className="sans" style={{ color: "#5C5748", fontSize: 13, marginBottom: 16 }}>
+        {form.tipo === "reorden" ? "Reposición de inventario para una sucursal — esto no es una venta a cliente." : "Llena el detalle del pedido."}
+      </p>
 
-      <div className="sans" style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#F0EDE4", border: "1px solid #C9C2AE", borderRadius: 4, padding: "12px 14px", marginBottom: 22, fontSize: 12.5, color: "#5C5748", lineHeight: 1.6 }}>
-        <Clock size={16} style={{ flexShrink: 0, marginTop: 2, color: "#8A6E4B" }} />
-        <div>
-          <strong style={{ color: "#20241F" }}>Cierres de pedido:</strong> los pedidos enviados de lunes a miércoles antes de las 10:00 a.m. llegan el <strong>viernes</strong>. Los pedidos enviados desde el miércoles después de las 10:00 a.m., y durante jueves, viernes y sábado, llegan el <strong>miércoles</strong> siguiente.
-        </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        {VENDEDORES_REORDEN_PERMITIDO.includes(vendedor) ? (
+          <>
+            <button
+              onClick={() => cambiarTipo("venta")}
+              className="sans"
+              style={{ flex: 1, padding: "10px 0", fontSize: 13, borderRadius: 4, border: `1px solid ${form.tipo === "venta" ? "#20241F" : "#C9C2AE"}`, background: form.tipo === "venta" ? "#20241F" : "none", color: form.tipo === "venta" ? "#F0EDE4" : "#5C5748", cursor: "pointer" }}
+            >
+              Pedido de venta
+            </button>
+            <button
+              onClick={() => cambiarTipo("reorden")}
+              className="sans"
+              style={{ flex: 1, padding: "10px 0", fontSize: 13, borderRadius: 4, border: `1px solid ${form.tipo === "reorden" ? "#B0553C" : "#C9C2AE"}`, background: form.tipo === "reorden" ? "#B0553C" : "none", color: form.tipo === "reorden" ? "#FBFAF6" : "#5C5748", cursor: "pointer" }}
+            >
+              Punto de reorden
+            </button>
+          </>
+        ) : null}
       </div>
 
-      <div style={{ background: "#FBFAF6", border: "1px solid #C9C2AE", borderRadius: 4, padding: 22, marginBottom: 22 }}>
+      {form.tipo === "venta" && (
+        <div className="sans" style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "#F0EDE4", border: "1px solid #C9C2AE", borderRadius: 4, padding: "12px 14px", marginBottom: 22, fontSize: 12.5, color: "#5C5748", lineHeight: 1.6 }}>
+          <Clock size={16} style={{ flexShrink: 0, marginTop: 2, color: "#8A6E4B" }} />
+          <div>
+            <strong style={{ color: "#20241F" }}>Cierres de pedido:</strong> los pedidos enviados de lunes a miércoles antes de las 10:00 a.m. llegan el <strong>viernes</strong>. Los pedidos enviados desde el miércoles después de las 10:00 a.m., y durante jueves, viernes y sábado, llegan el <strong>miércoles</strong> siguiente.
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: "#FBFAF6", border: `1px solid ${form.tipo === "reorden" ? "#E3B7A6" : "#C9C2AE"}`, borderRadius: 4, padding: 22, marginBottom: 22 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
           <Campo label="Fecha">
             <input type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} style={estiloInput} />
@@ -729,15 +779,28 @@ function VistaVendedor({ vendedor, onSalir }) {
           <Campo label="N.º de pedido">
             <input value={form.pedidoRef} onChange={(e) => setForm({ ...form, pedidoRef: e.target.value })} placeholder="Ej. PED-0231" style={estiloInput} />
           </Campo>
-          <Campo label="Cliente">
-            <input value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} placeholder="Nombre del cliente" style={estiloInput} />
-          </Campo>
-          <Campo label="Método de pago">
-            <select value={form.metodoPago} onChange={(e) => setForm({ ...form, metodoPago: e.target.value })} style={estiloInput}>
-              <option value="contado">Contado</option>
-              <option value="credito">Crédito</option>
-            </select>
-          </Campo>
+          {form.tipo === "reorden" ? (
+            <Campo label="Sucursal destino">
+              <select value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} style={estiloInput}>
+                <option value="">Selecciona la sucursal…</option>
+                {SUCURSALES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </Campo>
+          ) : (
+            <Campo label="Cliente">
+              <input value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} placeholder="Nombre del cliente" style={estiloInput} />
+            </Campo>
+          )}
+          {form.tipo === "venta" && (
+            <Campo label="Método de pago">
+              <select value={form.metodoPago} onChange={(e) => setForm({ ...form, metodoPago: e.target.value })} style={estiloInput}>
+                <option value="contado">Contado</option>
+                <option value="credito">Crédito</option>
+              </select>
+            </Campo>
+          )}
         </div>
 
         <div className="sans" style={{ fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase", color: "#8A6E4B", margin: "18px 0 2px" }}>Códigos del pedido</div>
@@ -917,8 +980,13 @@ function VistaVendedor({ vendedor, onSalir }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {propios.map((p) => (
             <div key={p.id} style={{ border: "1px solid #C9C2AE", borderRadius: 4, padding: "10px 14px", background: "#FBFAF6", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-              <div className="sans" style={{ fontSize: 13 }}>
-                <strong className="mono">{p.pedidoRef}</strong> · {p.cliente} · {p.fecha} {horaDe(p.creadoEn)} · {p.lineas.length} código{p.lineas.length !== 1 ? "s" : ""}
+              <div className="sans" style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span><strong className="mono">{p.pedidoRef}</strong> · {p.cliente} · {p.fecha} {horaDe(p.creadoEn)} · {p.lineas.length} código{p.lineas.length !== 1 ? "s" : ""}</span>
+                {p.tipo === "reorden" && (
+                  <span className="stamp" style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", padding: "2px 7px", borderRadius: 3, border: "1px solid #B0553C", color: "#B0553C" }}>
+                    Reorden
+                  </span>
+                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                 <a
@@ -1021,9 +1089,12 @@ const VENDEDOR_A_SUCURSAL = {
   Itvan: "WEB",
 };
 
+const SUCURSALES = ["EDISON", "PAITILLA", "COSTA DEL ESTE", "PROYECTO", "WEB"];
+
 function VistaCompras({ onSalir }) {
   const [pedidos, setPedidos] = useState([]);
   const [cargando, setCargando] = useState(true);
+  const [vistaTipo, setVistaTipo] = useState("venta"); // "venta" | "reorden"
   const [filtroEstado, setFiltroEstado] = useState("pendiente");
   const [filtroVendedor, setFiltroVendedor] = useState("");
   const [filtroDesde, setFiltroDesde] = useState("");
@@ -1103,9 +1174,10 @@ function VistaCompras({ onSalir }) {
     };
   }, [cargar]);
 
-  const vendedoresUnicos = [...new Set(pedidos.map((p) => p.vendedor))].filter(Boolean).sort();
+  const vendedoresUnicos = [...new Set(pedidos.filter((p) => p.tipo === vistaTipo).map((p) => p.vendedor))].filter(Boolean).sort();
 
   const visibles = pedidos
+    .filter((p) => p.tipo === vistaTipo)
     .filter((p) => (filtroEstado === "todos" ? true : p.estado === filtroEstado))
     .filter((p) => (filtroVendedor ? p.vendedor === filtroVendedor : true))
     .filter((p) => (filtroDesde ? p.fecha >= filtroDesde : true))
@@ -1122,13 +1194,14 @@ function VistaCompras({ onSalir }) {
     }
     const filas = [];
     aExportar.forEach((p) => p.lineas.forEach((l) => {
-      filas.push([l.codigo, l.cantidad, PRECIO_FIJO]);
+      filas.push([`"${l.codigo}"`, l.cantidad, PRECIO_FIJO]);
     }));
     const filasFinales = incluirEncabezados ? [["Codigo", "Cantidad", "Precio"], ...filas] : filas;
     const ws = XLSX.utils.aoa_to_sheet(filasFinales);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Hoja1");
-    XLSX.writeFile(wb, `compra_${hoy()}.xls`, { bookType: "biff8" });
+    const nombreArchivo = vistaTipo === "reorden" ? `reorden_${hoy()}.xls` : `compra_${hoy()}.xls`;
+    XLSX.writeFile(wb, nombreArchivo, { bookType: "biff8" });
 
     // Marcar como exportado: cada fila se actualiza por su propio id en la
     // base de datos, así que no hay riesgo de pisar un pedido nuevo que
@@ -1152,7 +1225,9 @@ function VistaCompras({ onSalir }) {
   };
 
   const generarInforme = async (desde, hasta) => {
+    const esReorden = vistaTipo === "reorden";
     const exportados = pedidos
+      .filter((p) => (esReorden ? p.tipo === "reorden" : p.tipo !== "reorden"))
       .filter((p) => p.estado === "exportado")
       .filter((p) => (filtroVendedor ? p.vendedor === filtroVendedor : true))
       .filter((p) => p.fecha >= desde)
@@ -1160,12 +1235,14 @@ function VistaCompras({ onSalir }) {
       .sort((a, b) => a.creadoEn - b.creadoEn);
 
     if (exportados.length === 0) {
-      setAviso({ tipo: "error", texto: "No hay pedidos exportados en ese rango de fechas." });
+      setAviso({ tipo: "error", texto: `No hay pedidos ${esReorden ? "de reposición" : "de venta"} exportados en ese rango de fechas.` });
       return;
     }
 
     setGenerandoInforme(true);
-    const encabezado = ["Fecha", "Pedido", "Cliente", "Vendedor", "Código", "Cantidad"];
+    const encabezado = esReorden
+      ? ["Fecha", "Pedido", "Sucursal", "Vendedor", "Código", "Cantidad"]
+      : ["Fecha", "Pedido", "Cliente", "Vendedor", "Código", "Cantidad"];
     const filasDe = (lista) => {
       const filas = [];
       lista.forEach((p) => {
@@ -1185,7 +1262,7 @@ function VistaCompras({ onSalir }) {
       ws.addRow(encabezado);
       ws.getRow(1).eachCell((celda) => {
         celda.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        celda.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF20241F" } };
+        celda.fill = { type: "pattern", pattern: "solid", fgColor: { argb: esReorden ? "FFB0553C" : "FF20241F" } };
         celda.alignment = { vertical: "middle", horizontal: "center" };
       });
       filas.forEach((fila, i) => {
@@ -1205,7 +1282,7 @@ function VistaCompras({ onSalir }) {
       ws.views = [{ state: "frozen", ySplit: 1 }];
     };
 
-    agregarHoja("Informe", filasDe(exportados), "FF20241F");
+    agregarHoja("Informe", filasDe(exportados), esReorden ? "FFB0553C" : "FF20241F");
 
     const ordenSucursales = ["EDISON", "PAITILLA", "COSTA DEL ESTE", "PROYECTO", "WEB"];
     const coloresSucursal = {
@@ -1215,13 +1292,17 @@ function VistaCompras({ onSalir }) {
       PROYECTO: "FF6B4C9A",
       WEB: "FF0E7C86",
     };
+    // Para reposición, la sucursal ya está guardada directo en el pedido
+    // (campo "cliente" = sucursal destino). Para ventas, se saca del
+    // vendedor que lo mandó, usando el mapa de sucursales.
+    const sucursalDe = (p) => (esReorden ? p.cliente : VENDEDOR_A_SUCURSAL[p.vendedor]);
     ordenSucursales.forEach((sucursal) => {
-      const pedidosSucursal = exportados.filter((p) => VENDEDOR_A_SUCURSAL[p.vendedor] === sucursal);
+      const pedidosSucursal = exportados.filter((p) => sucursalDe(p) === sucursal);
       if (pedidosSucursal.length > 0) {
         agregarHoja(sucursal, filasDe(pedidosSucursal), coloresSucursal[sucursal]);
       }
     });
-    const sinSucursal = exportados.filter((p) => !VENDEDOR_A_SUCURSAL[p.vendedor]);
+    const sinSucursal = exportados.filter((p) => !sucursalDe(p));
     if (sinSucursal.length > 0) {
       agregarHoja("Otros", filasDe(sinSucursal), "FF8A8370");
     }
@@ -1232,7 +1313,7 @@ function VistaCompras({ onSalir }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `informe-exportados_${desde}_a_${hasta}.xlsx`;
+      a.download = `informe-${esReorden ? "reposicion" : "exportados"}_${desde}_a_${hasta}.xlsx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1270,6 +1351,23 @@ function VistaCompras({ onSalir }) {
         </div>
       </div>
 
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        <button
+          onClick={() => { setVistaTipo("venta"); setSeleccion({}); setFiltroVendedor(""); }}
+          className="sans"
+          style={{ flex: 1, padding: "10px 0", fontSize: 13, borderRadius: 4, border: `1px solid ${vistaTipo === "venta" ? "#20241F" : "#C9C2AE"}`, background: vistaTipo === "venta" ? "#20241F" : "none", color: vistaTipo === "venta" ? "#F0EDE4" : "#5C5748", cursor: "pointer" }}
+        >
+          Pedidos de venta
+        </button>
+        <button
+          onClick={() => { setVistaTipo("reorden"); setSeleccion({}); setFiltroVendedor(""); }}
+          className="sans"
+          style={{ flex: 1, padding: "10px 0", fontSize: 13, borderRadius: 4, border: `1px solid ${vistaTipo === "reorden" ? "#B0553C" : "#C9C2AE"}`, background: vistaTipo === "reorden" ? "#B0553C" : "none", color: vistaTipo === "reorden" ? "#FBFAF6" : "#5C5748", cursor: "pointer" }}
+        >
+          Reposición de inventario (reorden)
+        </button>
+      </div>
+
       {avisoNuevos > 0 && (
         <div className="sans stamp" style={{ marginBottom: 16, fontSize: 14, padding: "10px 14px", borderRadius: 4, background: "#F3DCD3", color: "#8A3B22", border: "1px solid #B0553C" }}>
           🔔 {avisoNuevos === 1 ? "Llegó un pedido nuevo." : `Llegaron ${avisoNuevos} pedidos nuevos.`}
@@ -1277,7 +1375,9 @@ function VistaCompras({ onSalir }) {
       )}
 
       <p className="sans" style={{ color: "#5C5748", fontSize: 13, marginBottom: 24 }}>
-        Datos compartidos: todos los pedidos enviados por los vendedores aparecen aquí. El precio de exportación es fijo en $1.00 — el precio real se actualiza después directamente en el sistema.
+        {vistaTipo === "reorden"
+          ? "Pedidos de reposición de stock por sucursal — no son ventas a cliente y se exportan en un archivo aparte."
+          : "Datos compartidos: todos los pedidos enviados por los vendedores aparecen aquí. El precio de exportación es fijo en $1.00 — el precio real se actualiza después directamente en el sistema."}
       </p>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -1371,14 +1471,14 @@ function VistaCompras({ onSalir }) {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {visibles.map((p) => (
-              <div key={p.id} style={{ border: "1px solid #C9C2AE", borderRadius: 4, background: "#FBFAF6" }}>
+              <div key={p.id} style={{ border: `1px solid ${p.tipo === "reorden" ? "#E3B7A6" : "#C9C2AE"}`, borderRadius: 4, background: "#FBFAF6" }}>
                 <div className="sans" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #E4DFCF", fontSize: 13 }}>
                   <input type="checkbox" checked={!!seleccion[p.id]} onChange={(e) => setSeleccion({ ...seleccion, [p.id]: e.target.checked })} />
                   <strong className="mono">{p.pedidoRef}</strong>
-                  <span style={{ color: "#5C5748" }}>{p.cliente}</span>
+                  <span style={{ color: "#5C5748" }}>{p.tipo === "reorden" ? `Sucursal: ${p.cliente}` : p.cliente}</span>
                   <span style={{ color: "#8A8370" }}>{p.fecha} {horaDe(p.creadoEn)}</span>
                   <span style={{ color: "#8A8370" }}>{p.vendedor}</span>
-                  <span style={{ color: "#8A8370", textTransform: "uppercase", fontSize: 11 }}>{p.metodoPago}</span>
+                  {p.tipo !== "reorden" && <span style={{ color: "#8A8370", textTransform: "uppercase", fontSize: 11 }}>{p.metodoPago}</span>}
                   <span className="stamp" style={{ marginLeft: "auto", fontSize: 11, letterSpacing: 1, textTransform: "uppercase", padding: "3px 9px", borderRadius: 3, border: `1px solid ${p.estado === "exportado" ? "#3E5A2A" : "#8A6E4B"}`, color: p.estado === "exportado" ? "#3E5A2A" : "#8A6E4B" }}>
                     {p.estado === "exportado" ? "Exportado" : "Pendiente"}
                   </span>
